@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta http-equiv="content-type"
+		content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=640,initial-scale=1">
+<title>stcam</title>
+<style type="text/css">
+	html, body {
+		margin: 0;
+		padding: 0;
+		height: 100%;
+	}
+</style>
+<script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script type="text/javascript">
+var myuid = '';
+var socket = null;
+$(function(){
+	socket = io()
+	console.log(socket);
+	socket.on('member count', function(cnt){
+//		$('#memcnt').html('viewer:'+cnt);
+	});
+	socket.on('members', function(members){
+		console.log(members);
+		if(_.size(members) >= 1){
+			_.each(members, function(member){
+				if($('[data-rtcid='+member.id+']').length == 0){
+					startConnection(member.id);
+				}
+			});
+		}
+	});
+	socket.on('disconnect', function(uid){
+		$('[data-rtcid='+uid+']').remove();
+	});
+	socket.on('uid', function(uid){
+		console.log('your uid: '+uid);
+		myuid = uid;
+		//$('#myuid').val(uid);
+	});
+	socket.on('rtcmessage', recieve);
+
+	function logerror(error){
+		console.log(error.name + ': ' + error.message);
+	}
+
+	var peers = {};
+	var myStream = null;
+
+	var RTCPeerConnection = webkitRTCPeerConnection;
+	var URL = webkitURL;
+
+	function getMyUid(){
+		return myuid;
+//		return document.getElementById('myuid').value
+	}
+
+	function localDescCreated(peer, touid, desc){
+		peer.setLocalDescription(desc, function(){
+			send({
+					"desc": desc,
+					"uid": getMyUid(),
+					"to": touid,
+			});
+		}, function(){
+			console.log(arguments);
+		});
+	}
+
+	function startConnection(touid){
+		var peer = createPeer(touid);
+
+		if(!myStream){
+			navigator.webkitGetUserMedia(
+			{audio:true, video: true},
+			function(stream){
+				var video = document.getElementById('local-video');
+				myStream = stream;
+				video.src = URL.createObjectURL(stream);
+				peer.addStream(stream);
+
+				peer.createOffer(function(desc){
+					localDescCreated(peer, touid, desc);
+				}, logerror);
+			},
+			function(err){
+				console.log(err.name+':'+err.message);
+			});
+		}else{
+			peer.addStream(myStream);
+		}
+	}
+
+	var myStream = null;
+	function createPeer(touid){
+		var peer = peers[touid] = new RTCPeerConnection({
+				"iceServers": [{"url": "stun:stun.l.google.com:19302"}]
+		});
+		var video = $('<video>');
+		video.attr('autoplay', '1');
+		video.attr('id', 'remote-'+touid);
+		video.attr('data-isrtc', 'true');
+		video.attr('data-rtcid', touid);
+		video.css({
+			width: "160px",
+			height: "120px"
+		});
+		console.log(video);
+		$('#remotes').append(video);
+		
+
+		//peerのstreamが追加された時、それを表示するようにする
+		//下のローカルで行う、peer.addStreamは以下のイベントがトリガーされない
+		peer.onaddstream = function(e){
+			console.log('onaddstream');
+			console.log(this);
+			document.getElementById('remote-'+touid).src = URL.createObjectURL(e.stream);
+		};
+
+		//candidate(STUNサーバーから送られてくる、自分の接続情報)が作成された時はpeerにそれを送信する。
+		//STUNサーバーへは、createOffer,createAnswerが呼び出された時に始めてアクセスされる
+		peer.onicecandidate = function(e){
+			if(e.candidate){
+				send({
+					"candidate": e.candidate,
+					"uid": getMyUid(),
+					"to": touid,
+				});
+			}
+		};
+		
+		return peer;
+	}
+
+	function recieve(data){
+		var peer = peers[data.uid];
+		if( ! peer ){
+			peer = createPeer(data.uid);
+		}
+
+		//peerの確立の場合
+		if(data.desc){
+			var sdp = new RTCSessionDescription(data.desc);
+			peer.setRemoteDescription(sdp, function(){
+
+				//相手から接続を求められた場合はAnswerを返す
+				if( peer.remoteDescription.type == 'offer' ){
+					peer.createAnswer(function(desc){
+						localDescCreated(peer, data.uid, desc);
+					}, function(){
+						console.log(arguments);
+					});
+				}
+			},
+			function(){
+				console.log(arguments);
+			});
+		//candidateの受信の場合
+		}else if(data.candidate){
+			var candidate = new RTCIceCandidate(data.candidate);
+			peer.addIceCandidate(candidate);
+		}
+	}
+
+	//Peerの生成(主にNAT超えの問題に対応?)
+
+	/*
+	peer.onicecandidate = function(e){
+		if(e.candidate){
+			//console.log(e.candidate);
+		}
+	};
+
+	peer.onnegotiationneeded = function(){
+		peer.createOffer(localDescCreated, logerror);
+	};
+	*/
+
+	function send(obj){
+	/*	var div = document.createElement("div");
+		div.innerHTML = JSON.stringify(obj);
+		div.style.borderBottom = "solid 1px #CCC";
+		document.getElementById('recieved').appendChild( div );*/
+		socket.emit('rtcmessage', obj);
+	}
+
+	function startConnectionByInput(){
+		startConnection(document.getElementById('touid').value);
+	}
+
+/*	function recieveFromTextarea(){
+		recieve( JSON.parse(document.getElementById('textarea-elm').value) );
+	}*/
+});
+</script>
+</head><body>
+<div id="sidebar" style="width:80px;height:100%;background-color:#888888;float:left;"></div>
+<div id="main" style="padding:10px;margin-left:80px;">
+	<video id="local-video" style="width:160px;height:120px" autoplay=1></video>
+	<div id="remotes">
+	</div>
+	<!--<input type="text" id="myuid"></input>
+	<input type="text" id="touid"></input>
+	<textarea id="textarea-elm"></textarea>-->
+	<!--<button onclick="startConnectionByInput()">start</button>
+	<button onclick="recieveFromTextarea()">recieve</button>-->
+	<div id="recieved">
+	</div>
+	<div id="memcnt"></div>
+	<ul id="mlist">
+	</ul>
+	<a href="/logout">logout</a><br>
+	Chrome 23 or later<br>
+	Chrome for Android 37 or later<br>
+	<br>
+	Firefox 22 or later<br>
+	Firefox for Android 32 or later<br>
+	<br>
+	Opera 18 or later<br>
+	Opera Mobile 22 or later<br>
+</div>
+</body>
+</html>

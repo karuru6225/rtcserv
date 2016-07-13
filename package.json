@@ -1,0 +1,22 @@
+{
+  "name": "rtcserv",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+		"start": "node index.js"
+  },
+  "author": "karuru6225",
+  "license": "MIT",
+	"dependencies": {
+		"ejs": "*",
+		"express": "4.4.x",
+		"socket.io": "1.0.x",
+		"underscore": "*",
+		"cookie-parser": "*",
+		"body-parser": "*",
+		"multer": "*",
+		"passport-google": "*"
+	}
+}
